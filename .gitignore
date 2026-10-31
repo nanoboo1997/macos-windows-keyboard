@@ -1,0 +1,16 @@
+.DS_Store
+._*
+.env
+.env.*
+*.plist
+*.log
+*.bak
+*.bak-*
+karabiner.json
+karabiner-before-*.json
+karabiner-after-*.json
+karabiner-pending.json
+backup/
+backups/
+downloads/
+work/
