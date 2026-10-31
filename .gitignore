@@ -14,3 +14,8 @@ backup/
 backups/
 downloads/
 work/
+
+__pycache__/
+*.macos-windows-keyboard-state.json
+*.macos-windows-keyboard.lock/
+.mwk-*.tmp
