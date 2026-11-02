@@ -67,7 +67,7 @@ class InstallerIntegrationTests(unittest.TestCase):
         original = self.base()
         original_bytes = self.write(original)
         result = self.call()
-        self.assertEqual(result["added_rules"], 4)
+        self.assertEqual(result["added_rules"], len(SOURCE))
         backup = Path(result["backup_path"])
         self.assertEqual((backup / "config.before.json").read_bytes(), original_bytes)
         self.assertFalse(json.loads((backup / "manifest.json").read_text())["state_existed"])
@@ -80,7 +80,7 @@ class InstallerIntegrationTests(unittest.TestCase):
         installed["profiles"][0]["complex_modifications"]["rules"].append(later)
         self.write(installed)
         removed = self.call("uninstall")
-        self.assertEqual(removed["removed_rules"], 4)
+        self.assertEqual(removed["removed_rules"], len(SOURCE))
         final = self.read()
         self.assertEqual(final["profiles"][0]["complex_modifications"]["rules"],
                          [self.foreign, later])
@@ -94,7 +94,7 @@ class InstallerIntegrationTests(unittest.TestCase):
         backups = list((self.config.parent / "backups").rglob("manifest.json"))
         result = self.call()
         self.assertEqual(result["status"], "unchanged")
-        self.assertEqual(result["skipped_existing_rules"], 4)
+        self.assertEqual(result["skipped_existing_rules"], len(SOURCE))
         self.assertIsNone(result["backup_path"])
         self.assertEqual(config, self.config.read_bytes())
         self.assertEqual(state, self.state.read_bytes())
@@ -103,7 +103,7 @@ class InstallerIntegrationTests(unittest.TestCase):
     def test_existing_manual_rules_are_not_adopted_or_removed(self):
         original = self.write(self.base(SOURCE))
         result = self.call()
-        self.assertEqual(result["skipped_existing_rules"], 4)
+        self.assertEqual(result["skipped_existing_rules"], len(SOURCE))
         self.assertEqual(original, self.config.read_bytes())
         self.assertFalse(self.state.exists())
         result = self.call("uninstall")
@@ -116,7 +116,7 @@ class InstallerIntegrationTests(unittest.TestCase):
         manual["enabled"] = False
         self.write(self.base([manual]))
         result = self.call()
-        self.assertEqual(result["added_rules"], 3)
+        self.assertEqual(result["added_rules"], len(SOURCE) - 1)
         self.assertEqual(result["skipped_existing_rules"], 1)
         self.call("uninstall")
         self.assertEqual(self.read()["profiles"][0]["complex_modifications"]["rules"], [manual])
@@ -140,11 +140,11 @@ class InstallerIntegrationTests(unittest.TestCase):
         self.call("install", "--profile", "Other")
         current = self.read()
         self.assertFalse(current["profiles"][1]["selected"])
-        self.assertEqual(len(current["profiles"][1]["complex_modifications"]["rules"]), 4)
+        self.assertEqual(len(current["profiles"][1]["complex_modifications"]["rules"]), len(SOURCE))
         current["profiles"][0]["name"] = "Renamed after install"
         self.write(current)
         result = self.call("uninstall")
-        self.assertEqual(result["removed_rules"], 8)
+        self.assertEqual(result["removed_rules"], len(SOURCE) * 2)
         self.assertEqual(self.read()["profiles"][0]["complex_modifications"]["rules"], [self.foreign])
 
     def test_ambiguous_profile_requires_explicit_name(self):
@@ -199,7 +199,7 @@ class InstallerIntegrationTests(unittest.TestCase):
         self.call()
         installed, state = self.config.read_bytes(), self.state.read_bytes()
         result = self.call("uninstall", "--dry-run")
-        self.assertEqual(result["removed_rules"], 4)
+        self.assertEqual(result["removed_rules"], len(SOURCE))
         self.assertEqual(installed, self.config.read_bytes())
         self.assertEqual(state, self.state.read_bytes())
 
@@ -224,7 +224,7 @@ class InstallerIntegrationTests(unittest.TestCase):
         self.write(config)
         result = self.call("uninstall")
         self.assertEqual(result["status"], "partial")
-        self.assertEqual(result["removed_rules"], 3)
+        self.assertEqual(result["removed_rules"], len(SOURCE) - 1)
         self.assertEqual(result["preserved_edited_rules"], [edited["description"]])
         self.assertEqual(self.read()["profiles"][0]["complex_modifications"]["rules"],
                          [self.foreign, edited])
@@ -239,7 +239,7 @@ class InstallerIntegrationTests(unittest.TestCase):
         config["profiles"][0]["complex_modifications"]["rules"][1]["enabled"] = False
         self.write(config)
         result = self.call("uninstall")
-        self.assertEqual(result["removed_rules"], 4)
+        self.assertEqual(result["removed_rules"], len(SOURCE))
         self.assertFalse(result["preserved_edited_rules"])
 
     def test_backup_failure_prevents_live_changes_and_cleans_lock(self):
@@ -279,9 +279,9 @@ class InstallerIntegrationTests(unittest.TestCase):
             results = [(process, process.communicate(timeout=30)) for process in processes]
             self.assertTrue(any(process.returncode == 0 for process, _ in results))
             rules = self.read()["profiles"][0]["complex_modifications"]["rules"]
-            self.assertEqual(len(rules), 5)
+            self.assertEqual(len(rules), len(SOURCE) + 1)
             state = json.loads(self.state.read_text())
-            self.assertEqual(len(state["rules"]), 4)
+            self.assertEqual(len(state["rules"]), len(SOURCE))
             self.assertEqual({r["description"] for r in rules[1:]},
                              {e["rule"]["description"] for e in state["rules"]})
             self.call("uninstall")
@@ -293,7 +293,7 @@ class InstallerIntegrationTests(unittest.TestCase):
         self.call()
         self.config.write_bytes(original)
         self.call()
-        self.assertEqual(len(self.read()["profiles"][0]["complex_modifications"]["rules"]), 5)
+        self.assertEqual(len(self.read()["profiles"][0]["complex_modifications"]["rules"]), len(SOURCE) + 1)
         self.call("uninstall")
         self.assertEqual(self.read()["profiles"][0]["complex_modifications"]["rules"],
                          [self.foreign])
@@ -311,10 +311,93 @@ class InstallerIntegrationTests(unittest.TestCase):
         self.call("uninstall")
         self.assertEqual(self.read(), config)
 
+    def test_upgrade_from_four_managed_rules_adds_only_terminal_rule(self):
+        self.write(self.base())
+        old_asset = self.root / "old-rules.json"
+        old_asset.write_text(json.dumps({"rules": SOURCE[:-1]}))
+        first = self.call(source=old_asset)
+        self.assertEqual(first["added_rules"], len(SOURCE) - 1)
+        before = self.config.read_bytes()
+        old_rules = copy.deepcopy(self.read()["profiles"][0]["complex_modifications"]["rules"])
+        result = self.call()
+        self.assertEqual(result["added_rules"], 1)
+        self.assertEqual(result["skipped_existing_rules"], len(SOURCE) - 1)
+        self.assertEqual((Path(result["backup_path"]) / "config.before.json").read_bytes(), before)
+        self.assertEqual(self.read()["profiles"][0]["complex_modifications"]["rules"][:-1], old_rules)
+        self.assertEqual(len(json.loads(self.state.read_text())["rules"]), len(SOURCE))
+        self.assertEqual(self.call("uninstall")["removed_rules"], len(SOURCE))
+        self.assertEqual(self.read()["profiles"][0]["complex_modifications"]["rules"], [self.foreign])
+
+    def test_upgrade_from_manual_old_rules_does_not_adopt_them(self):
+        original = self.base(SOURCE[:-1])
+        self.write(original)
+        result = self.call()
+        self.assertEqual(result["added_rules"], 1)
+        self.assertEqual(result["skipped_existing_rules"], len(SOURCE) - 1)
+        self.assertEqual(len(json.loads(self.state.read_text())["rules"]), 1)
+        self.assertEqual(self.call("uninstall")["removed_rules"], 1)
+        self.assertEqual(self.read(), original)
+
     def test_unknown_option_is_rejected(self):
         original = self.write(self.base())
         self.call("install", "--force", ok=False)
         self.assertEqual(original, self.config.read_bytes())
+
+
+class KeyboardRuleScopeTests(unittest.TestCase):
+    def outputs(self, key, app="com.apple.Safari", built_in=False, modifiers=("control",)):
+        import re
+        result = []
+        device = {"is_keyboard": True, "is_built_in_keyboard": built_in}
+        for rule in SOURCE:
+            for manipulator in rule["manipulators"]:
+                incoming = manipulator["from"]
+                if incoming["key_code"] != key:
+                    continue
+                required = set(incoming.get("modifiers", {}).get("mandatory", []))
+                optional = set(incoming.get("modifiers", {}).get("optional", []))
+                actual = set(modifiers)
+                if not required <= actual or not actual <= required | optional:
+                    continue
+                matched = True
+                for condition in manipulator["conditions"]:
+                    kind = condition["type"]
+                    if kind == "device_if":
+                        matched = matched and any(all(device.get(k) == v for k, v in identity.items())
+                                                  for identity in condition["identifiers"])
+                    elif kind in ("frontmost_application_if", "frontmost_application_unless"):
+                        app_match = any(re.fullmatch(pattern, app)
+                                        for pattern in condition["bundle_identifiers"])
+                        matched = matched and (app_match if kind.endswith("_if") else not app_match)
+                    else:
+                        raise AssertionError("Unhandled condition: " + kind)
+                if matched:
+                    result.append(manipulator["to"])
+        return result
+
+    def test_terminal_copy_paste_without_remapping_other_control_keys(self):
+        for app in ("com.apple.Terminal", "com.googlecode.iterm2"):
+            for key in ("c", "v"):
+                with self.subTest(app=app, key=key):
+                    self.assertEqual(self.outputs(key, app),
+                                     [[{"key_code": key, "modifiers": ["left_command"]}]])
+            for key in ("x", "z", "a", "s", "f", "y"):
+                self.assertEqual(self.outputs(key, app), [])
+
+    def test_other_apps_keep_all_windows_shortcuts_and_builtin_is_untouched(self):
+        for app in ("com.apple.Safari", "com.apple.Notes"):
+            for key in ("c", "v", "x", "z", "a", "s", "f", "y"):
+                target = "z" if key == "y" else key
+                mods = ["left_command", "left_shift"] if key == "y" else ["left_command"]
+                self.assertEqual(self.outputs(key, app), [[{"key_code": target, "modifiers": mods}]])
+        for app in ("com.apple.Safari", "com.apple.Terminal", "com.googlecode.iterm2"):
+            for key in ("c", "v", "x", "z", "a", "s", "f", "y"):
+                self.assertEqual(self.outputs(key, app, built_in=True), [])
+                self.assertEqual(self.outputs(key, app, modifiers=("control", "shift")), [])
+            self.assertEqual(self.outputs("grave_accent_and_tilde", app, modifiers=()),
+                             [[{"key_code": "spacebar", "modifiers": ["left_control"], "repeat": False}]])
+            self.assertEqual(self.outputs("grave_accent_and_tilde", app, modifiers=("shift",)), [])
+            self.assertEqual(self.outputs("grave_accent_and_tilde", app, built_in=True, modifiers=()), [])
 
 
 if __name__ == "__main__":
