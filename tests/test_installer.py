@@ -311,7 +311,7 @@ class InstallerIntegrationTests(unittest.TestCase):
         self.call("uninstall")
         self.assertEqual(self.read(), config)
 
-    def test_upgrade_from_four_managed_rules_adds_only_terminal_rule(self):
+    def test_upgrade_from_five_managed_rules_adds_only_finder_rule(self):
         self.write(self.base())
         old_asset = self.root / "old-rules.json"
         old_asset.write_text(json.dumps({"rules": SOURCE[:-1]}))
@@ -338,6 +338,19 @@ class InstallerIntegrationTests(unittest.TestCase):
         self.assertEqual(self.call("uninstall")["removed_rules"], 1)
         self.assertEqual(self.read(), original)
 
+    def test_upgrade_from_four_rules_adds_terminal_and_finder_only(self):
+        self.write(self.base())
+        old_asset = self.root / "four-rules.json"
+        old_asset.write_text(json.dumps({"rules": SOURCE[:4]}))
+        self.call(source=old_asset)
+        before = copy.deepcopy(self.read()["profiles"][0]["complex_modifications"]["rules"])
+        result = self.call()
+        self.assertEqual(result["added_rules"], 2)
+        self.assertEqual(result["skipped_existing_rules"], 4)
+        self.assertEqual(self.read()["profiles"][0]["complex_modifications"]["rules"][:len(before)], before)
+        self.call("uninstall")
+        self.assertEqual(self.read()["profiles"][0]["complex_modifications"]["rules"], [self.foreign])
+
     def test_unknown_option_is_rejected(self):
         original = self.write(self.base())
         self.call("install", "--force", ok=False)
@@ -352,7 +365,7 @@ class KeyboardRuleScopeTests(unittest.TestCase):
         for rule in SOURCE:
             for manipulator in rule["manipulators"]:
                 incoming = manipulator["from"]
-                if incoming["key_code"] != key:
+                if incoming.get("key_code") != key:
                     continue
                 required = set(incoming.get("modifiers", {}).get("mandatory", []))
                 optional = set(incoming.get("modifiers", {}).get("optional", []))
@@ -398,6 +411,36 @@ class KeyboardRuleScopeTests(unittest.TestCase):
                              [[{"key_code": "spacebar", "modifiers": ["left_control"], "repeat": False}]])
             self.assertEqual(self.outputs("grave_accent_and_tilde", app, modifiers=("shift",)), [])
             self.assertEqual(self.outputs("grave_accent_and_tilde", app, built_in=True, modifiers=()), [])
+
+
+class FinderControlLifetimeTests(unittest.TestCase):
+    def test_hold_survives_intermediate_to_keyup_until_physical_release(self):
+        # Model event_sender.hpp: non-last to entries receive immediate key-up.
+        # This reproduces the original bug even though Karabiner JSON lint passes.
+        trackers = [m for r in SOURCE for m in r["manipulators"]
+                    if m["from"].get("key_code") in ("left_control", "right_control")]
+        self.assertEqual(len(trackers), 2)
+        for tracker in trackers:
+            state = {}
+            def dispatch(event, phase):
+                variable = event.get("set_variable")
+                if variable:
+                    field = "value" if phase == "down" else "key_up_value"
+                    if field in variable:
+                        state[variable["name"]] = variable[field]
+            for cycle in range(3):
+                events = tracker["to"]
+                for index, event in enumerate(events):
+                    dispatch(event, "down")
+                    if index < len(events) - 1 or not event.get("repeat", True):
+                        dispatch(event, "up")
+                name = events[0]["set_variable"]["name"]
+                self.assertIs(state[name], True, "Ctrl must remain held during clicks")
+                dispatch(events[-1], "up")
+                for event in tracker.get("to_after_key_up", []):
+                    dispatch(event, "down")
+                    dispatch(event, "up")
+                self.assertIs(state[name], False, "Physical release must clear Ctrl")
 
 
 if __name__ == "__main__":
