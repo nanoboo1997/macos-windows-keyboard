@@ -351,6 +351,32 @@ class InstallerIntegrationTests(unittest.TestCase):
         self.call("uninstall")
         self.assertEqual(self.read()["profiles"][0]["complex_modifications"]["rules"], [self.foreign])
 
+    def test_upgrade_from_logitech_rules_preserves_legacy_and_device_defaults(self):
+        legacy = copy.deepcopy(SOURCE)
+        legacy[-1]["description"] = "External keyboards: Ctrl-click selects multiple files in Finder with Logitech mouse"
+        for m in legacy[-1]["manipulators"]:
+            if m["from"].get("pointing_button"):
+                for c in m["conditions"]:
+                    if c["type"] == "device_if":
+                        c["identifiers"] = [{"is_pointing_device": True, "product_id": 50495, "vendor_id": 1133}]
+        original = self.base()
+        original["profiles"][0]["ignore_pointing_device_events_by_default"] = True
+        self.write(original)
+        old_asset = self.root / "logitech-rules.json"
+        old_asset.write_text(json.dumps({"rules": legacy}))
+        self.call(source=old_asset)
+        prior = copy.deepcopy(self.read())
+        result = self.call()
+        self.assertEqual(result["added_rules"], 1)
+        self.assertEqual(result["skipped_existing_rules"], len(SOURCE) - 1)
+        current = self.read()
+        self.assertEqual(current["profiles"][0]["complex_modifications"]["rules"][:-1],
+                         prior["profiles"][0]["complex_modifications"]["rules"])
+        self.assertIs(current["profiles"][0]["ignore_pointing_device_events_by_default"], True)
+        self.assertEqual(current["profiles"][0]["devices"], original["profiles"][0]["devices"])
+        self.assertEqual(self.call("uninstall")["removed_rules"], len(SOURCE) + 1)
+        self.assertEqual(self.read(), original)
+
     def test_unknown_option_is_rejected(self):
         original = self.write(self.base())
         self.call("install", "--force", ok=False)
@@ -414,6 +440,36 @@ class KeyboardRuleScopeTests(unittest.TestCase):
 
 
 class FinderControlLifetimeTests(unittest.TestCase):
+    def test_click_scope_accepts_multiple_mouse_models_only_in_finder_with_external_control(self):
+        import re
+        clicks = [m for r in SOURCE for m in r["manipulators"] if m["from"].get("pointing_button")]
+        self.assertEqual(len(clicks), 2)
+        def matches(m, device, app, held):
+            for c in m["conditions"]:
+                if c["type"] == "device_if":
+                    if not any(all(device.get(k) == v for k, v in d.items()) for d in c["identifiers"]):
+                        return False
+                elif c["type"] == "frontmost_application_if":
+                    if not any(re.fullmatch(pattern, app) for pattern in c["bundle_identifiers"]):
+                        return False
+                elif c["type"] == "variable_if":
+                    if held.get(c["name"]) != c["value"]:
+                        return False
+                else:
+                    self.fail("Unhandled click condition: " + c["type"])
+            return True
+        for m in clicks:
+            name = next(c["name"] for c in m["conditions"] if c["type"] == "variable_if")
+            for vendor, product in ((1133, 50495), (1000, 2000), (9999, 3333)):
+                mouse = {"is_pointing_device": True, "vendor_id": vendor, "product_id": product}
+                self.assertTrue(matches(m, mouse, "com.apple.finder", {name: True}))
+                self.assertFalse(matches(m, mouse, "com.apple.Safari", {name: True}))
+                self.assertFalse(matches(m, mouse, "com.apple.finder", {name: False}))
+                self.assertFalse(matches(m, mouse, "com.apple.finder", {}))
+            self.assertFalse(matches(m, {"is_keyboard": True}, "com.apple.finder", {name: True}))
+            self.assertEqual(m["from"]["pointing_button"], "button1")
+            self.assertEqual(m["to"], [{"pointing_button": "button1", "modifiers": ["left_command"]}])
+
     def test_hold_survives_intermediate_to_keyup_until_physical_release(self):
         # Model event_sender.hpp: non-last to entries receive immediate key-up.
         # This reproduces the original bug even though Karabiner JSON lint passes.

@@ -459,7 +459,7 @@
             ]
         },
         {
-            "description": "External keyboards: Ctrl-click selects multiple files in Finder with Logitech mouse",
+            "description": "External keyboards: Ctrl-click selects multiple files in Finder with external mice",
             "manipulators": [
                 {
                     "type": "basic",
@@ -580,9 +580,7 @@
                             "type": "device_if",
                             "identifiers": [
                                 {
-                                    "is_pointing_device": true,
-                                    "product_id": 50495,
-                                    "vendor_id": 1133
+                                    "is_pointing_device": true
                                 }
                             ]
                         }
@@ -625,9 +623,7 @@
                             "type": "device_if",
                             "identifiers": [
                                 {
-                                    "is_pointing_device": true,
-                                    "product_id": 50495,
-                                    "vendor_id": 1133
+                                    "is_pointing_device": true
                                 }
                             ]
                         }
