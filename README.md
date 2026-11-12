@@ -126,6 +126,10 @@ bash uninstall.sh
 ใช้ได้โดยไม่จำกัดยี่ห้อ ทั้ง USB ตัวรับไร้สาย และ Bluetooth ที่ Karabiner รับเหตุการณ์ได้ ส่วน Magic Mouse และแทร็คแพด Apple ไม่รองรับวิธีนี้ ดู [รายละเอียด การทดสอบ และวิธีย้อนกลับ](docs/finder-ctrl-click.md)
 
 
+## Caps Lock ล็อกชุด Shift สำหรับคีย์บอร์ดภายนอก
+
+กฎเสริม [external-shift-lock.json](karabiner/external-shift-lock.json) ให้ Caps Lock เปิด–ปิดชุด Shift สำหรับการพิมพ์ภาษาไทยและอังกฤษ ดู [วิธีติดตั้ง ลำดับกฎ และข้อจำกัด](docs/external-shift-lock.md) ตัวติดตั้งหลักไม่เพิ่มกฎเสริมนี้อัตโนมัติ
+
 ## Warband: Ctrl+X และปุ่มใต้ Esc
 
 เพิ่มกฎเสริม [Warband](karabiner/warband.json) ได้ตาม [คู่มือติดตั้งและย้อนกลับ](docs/warband.md) กฎนี้แยกจากชุดหลักและต้องวาง **เหนือ** กฎภาษาและ Ctrl เดิมใน Complex Modifications มิฉะนั้นกฎเดิมอาจทำงานก่อน ตัวติดตั้งหลักไม่เพิ่มกฎเสริมนี้ให้อัตโนมัติ
