@@ -125,6 +125,11 @@ bash uninstall.sh
 
 ใช้ได้โดยไม่จำกัดยี่ห้อ ทั้ง USB ตัวรับไร้สาย และ Bluetooth ที่ Karabiner รับเหตุการณ์ได้ ส่วน Magic Mouse และแทร็คแพด Apple ไม่รองรับวิธีนี้ ดู [รายละเอียด การทดสอบ และวิธีย้อนกลับ](docs/finder-ctrl-click.md)
 
+
+## Warband: Ctrl+X และปุ่มใต้ Esc
+
+เพิ่มกฎเสริม [Warband](karabiner/warband.json) ได้ตาม [คู่มือติดตั้งและย้อนกลับ](docs/warband.md) กฎนี้แยกจากชุดหลักและต้องวาง **เหนือ** กฎภาษาและ Ctrl เดิมใน Complex Modifications มิฉะนั้นกฎเดิมอาจทำงานก่อน ตัวติดตั้งหลักไม่เพิ่มกฎเสริมนี้ให้อัตโนมัติ
+
 ## ข้อจำกัด
 
 - ปุ่มใต้ Esc ต้องส่ง `grave_accent_and_tilde` รุ่น ISO/JIS หรือเฟิร์มแวร์บางแบบอาจส่งรหัสต่างกัน ตรวจได้ด้วย EventViewer
