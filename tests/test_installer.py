@@ -49,11 +49,11 @@ class InstallerIntegrationTests(unittest.TestCase):
         return json.loads(self.config.read_text())
 
     def call(self, mode="install", *args, ok=True, source=None):
-        if source is None:
+        if source == "full":
             command = ["/bin/bash", str(REPO / (mode + ".sh"))]
         else:
             command = ["/usr/bin/osascript", "-l", "JavaScript",
-                       str(REPO / "scripts" / "manage.js"), mode, str(source)]
+                       str(REPO / "scripts" / "manage.js"), mode, str(source or ASSET)]
         result = subprocess.run(
             command + ["--config", str(self.config)] + list(args),
             text=True, capture_output=True)
@@ -279,9 +279,9 @@ class InstallerIntegrationTests(unittest.TestCase):
             results = [(process, process.communicate(timeout=30)) for process in processes]
             self.assertTrue(any(process.returncode == 0 for process, _ in results))
             rules = self.read()["profiles"][0]["complex_modifications"]["rules"]
-            self.assertEqual(len(rules), len(SOURCE) + 1)
+            self.assertEqual(len(rules), len(SOURCE) + 3)
             state = json.loads(self.state.read_text())
-            self.assertEqual(len(state["rules"]), len(SOURCE))
+            self.assertEqual(len(state["rules"]), len(SOURCE) + 2)
             self.assertEqual({r["description"] for r in rules[1:]},
                              {e["rule"]["description"] for e in state["rules"]})
             self.call("uninstall")
@@ -376,6 +376,64 @@ class InstallerIntegrationTests(unittest.TestCase):
         self.assertEqual(current["profiles"][0]["devices"], original["profiles"][0]["devices"])
         self.assertEqual(self.call("uninstall")["removed_rules"], len(SOURCE) + 1)
         self.assertEqual(self.read(), original)
+
+    def test_full_install_upgrade_order_backup_and_uninstall(self):
+        original = self.base()
+        self.write(original)
+        self.call()  # Previous installer: six core rules.
+        prior = self.read()
+        prior_bytes = self.config.read_bytes()
+        old_rules = copy.deepcopy(prior["profiles"][0]["complex_modifications"]["rules"])
+        result = self.call(source="full")
+        self.assertEqual(result["added_rules"], 2)
+        self.assertEqual(result["skipped_existing_rules"], len(SOURCE))
+        self.assertEqual((Path(result["backup_path"]) / "config.before.json").read_bytes(), prior_bytes)
+        rules = self.read()["profiles"][0]["complex_modifications"]["rules"]
+        self.assertEqual(rules[0], self.foreign)
+        self.assertIn("Caps Lock toggles typing Shift Lock", rules[1]["description"])
+        self.assertIn("Warband: external keyboard", rules[2]["description"])
+        self.assertEqual([rules[0]] + rules[3:], old_rules)
+        again = self.call(source="full")
+        self.assertEqual(again["status"], "unchanged")
+        self.assertEqual(again["skipped_existing_rules"], len(SOURCE) + 2)
+        self.assertEqual(self.call("uninstall", source="full")["removed_rules"], len(SOURCE) + 2)
+        self.assertEqual(self.read(), original)
+
+    def test_full_fresh_install_has_extras_before_base(self):
+        before = self.write(self.base())
+        result = self.call(source="full")
+        self.assertEqual(result["added_rules"], len(SOURCE) + 2)
+        self.assertEqual((Path(result["backup_path"]) / "config.before.json").read_bytes(), before)
+        rules = self.read()["profiles"][0]["complex_modifications"]["rules"]
+        self.assertEqual(rules[0], self.foreign)
+        self.assertIn("Caps Lock toggles typing Shift Lock", rules[1]["description"])
+        self.assertIn("Warband: external keyboard", rules[2]["description"])
+        self.assertEqual(len(rules), len(SOURCE) + 3)
+        self.assertEqual(self.call("uninstall", source="full")["removed_rules"], len(SOURCE) + 2)
+        self.assertEqual(self.read(), self.base())
+
+    def test_preexisting_manual_extras_preserved_and_misordering_aborts(self):
+        extras = [json.loads((REPO / "karabiner" / filename).read_text())["rules"][0]
+                  for filename in ("external-shift-lock.json", "warband.json")]
+        self.write(self.base(extras + SOURCE))
+        before = self.config.read_bytes()
+        self.assertEqual(self.call(source="full")["status"], "unchanged")
+        self.assertEqual(self.call("uninstall", source="full")["removed_rules"], 0)
+        self.assertEqual(self.config.read_bytes(), before)
+        before = self.write(self.base(SOURCE + extras))
+        result = self.call(ok=False, source="full")
+        self.assertIn("below a base rule", result.stderr)
+        self.assertEqual(self.config.read_bytes(), before)
+        self.assertFalse(self.state.exists())
+
+    def test_missing_supplement_never_changes_existing_config(self):
+        before = self.write(self.base())
+        source = self.root / "core.json"
+        source.write_text(json.dumps({"rules": SOURCE}))
+        result = self.call("install", "--include-extras", ok=False, source=source)
+        self.assertIn("Rule file is missing", result.stderr)
+        self.assertEqual(self.config.read_bytes(), before)
+        self.assertFalse(self.state.exists())
 
     def test_unknown_option_is_rejected(self):
         original = self.write(self.base())

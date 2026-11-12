@@ -151,11 +151,12 @@ function run(argv) {
     if (mode !== "install" && mode !== "uninstall") fail("Unknown operation.");
     var env = $.NSProcessInfo.processInfo.environment;
     var home = ObjC.unwrap(env.objectForKey("HOME")) || ObjC.unwrap($.NSHomeDirectory());
-    var options = { config: home + "/.config/karabiner/karabiner.json", profile: null, backup: null, dry: false };
+    var options = { config: home + "/.config/karabiner/karabiner.json", profile: null, backup: null, dry: false, extras: false };
     for (var i = 2; i < argv.length; i++) {
         var arg = argv[i];
         if (arg === "--help" || arg === "-h") return usage();
         if (arg === "--dry-run") { options.dry = true; continue; }
+        if (arg === "--include-extras") { options.extras = true; continue; }
         if (arg !== "--config" && arg !== "--profile" && arg !== "--backup-dir") fail("Unknown option: " + arg);
         if (++i >= argv.length || !argv[i] || argv[i].indexOf("--") === 0) fail("Missing value for " + arg);
         if (arg === "--config") options.config = argv[i];
@@ -187,6 +188,20 @@ function run(argv) {
         if (!sourceBefore.exists) fail("Rule file is missing.");
         var source = parse(sourceBefore.text, sourcePath);
         if (!object(source) || !Array.isArray(source.rules) || !source.rules.length) fail("Rule file has no rules.");
+        var baseRules = source.rules.slice();
+        var extraRules = [];
+        if (options.extras) {
+            ["external-shift-lock.json", "warband.json"].forEach(function (filename) {
+                var path = parent(absolute(sourcePath)) + "/" + filename;
+                var saved = snapshot(path);
+                if (!saved.exists) fail("Rule file is missing: " + path);
+                var extra = parse(saved.text, path);
+                if (!object(extra) || !Array.isArray(extra.rules) || extra.rules.length !== 1)
+                    fail("Invalid supplementary rule file: " + path);
+                extraRules.push(extra.rules[0]);
+            });
+        }
+        source.rules = extraRules.concat(baseRules);
         var sourceDescriptions = Object.create(null);
         source.rules.forEach(function (rule) {
             if (!object(rule) || typeof rule.description !== "string" || !rule.description ||
@@ -217,10 +232,27 @@ function run(argv) {
                 fail("A different rule already uses this description; existing rule was left untouched: " + desired.description);
             var added = copy(desired);
             added.description = "[" + packageName + ":" + state.token + ":" + uuid().slice(0, 12) + "] " + desired.description;
-            targetRules.push(added);
+            if (extraRules.indexOf(desired) !== -1) {
+                /* Preserve existing rule order; insert ahead of the first known base rule. */
+                var firstBase = targetRules.findIndex(function (rule) {
+                    return object(rule) && baseRules.some(function (base) { return semantic(rule) === semantic(base); });
+                });
+                targetRules.splice(firstBase < 0 ? targetRules.length : firstBase, 0, added);
+            } else targetRules.push(added);
             nextState.rules.push({ rule: copy(added) });
             report.added_rules++;
         });
+        /* Never silently adopt or move a pre-existing duplicate which is shadowed. */
+        if (options.extras) {
+            var firstBaseIndex = targetRules.findIndex(function (rule) {
+                return object(rule) && baseRules.some(function (base) { return semantic(rule) === semantic(base); });
+            });
+            extraRules.forEach(function (extra) {
+                var index = targetRules.findIndex(function (rule) { return object(rule) && semantic(rule) === semantic(extra); });
+                if (index < 0 || (firstBaseIndex >= 0 && index > firstBaseIndex))
+                    fail("Existing supplementary rule is below a base rule; move it above the base rules in Karabiner and retry: " + extra.description);
+            });
+        }
         configChanged = report.added_rules > 0;
     } else {
         var owned = Object.create(null), retained = Object.create(null);
